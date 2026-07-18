@@ -21,7 +21,9 @@ class VideoRepost(commands.Cog):
         self.bot = bot
 
     repost_group = app_commands.Group(
-        name="repost", description="Configure marketing-video reposting."
+        name="repost",
+        description="Configure marketing-video reposting.",
+        default_permissions=discord.Permissions(administrator=True),
     )
 
     @repost_group.command(name="setup", description="Set the source and target channels.")
@@ -29,7 +31,7 @@ class VideoRepost(commands.Cog):
         source="Channel where admins upload videos",
         target="Channel where Octo reposts them",
     )
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(administrator=True)
     async def repost_setup(
         self,
         interaction: discord.Interaction,
@@ -45,6 +47,7 @@ class VideoRepost(commands.Cog):
         )
 
     @repost_group.command(name="status", description="Show the current repost configuration.")
+    @app_commands.checks.has_permissions(administrator=True)
     async def repost_status(self, interaction: discord.Interaction) -> None:
         guild_id = interaction.guild_id or 0
         source = await self.bot.db.get_setting(guild_id, _SOURCE_KEY)
@@ -78,19 +81,48 @@ class VideoRepost(commands.Cog):
             return
 
         caption = message.content.strip()
+        header = f"📣 **{caption}**" if caption else None
+        size_limit = getattr(message.guild, "filesize_limit", 25 * 1024 * 1024)
+
+        posted_any = False
         for video in videos:
+            if await self._repost_one(target, video, header, size_limit):
+                posted_any = True
+
+        if posted_any:
+            try:
+                await message.add_reaction("✅")
+            except discord.HTTPException:
+                pass
+
+    async def _repost_one(
+        self,
+        target: discord.abc.Messageable,
+        video: discord.Attachment,
+        header: str | None,
+        size_limit: int,
+    ) -> bool:
+        """Re-upload the video; if it's too big, fall back to posting its link."""
+        # Only try a re-upload if it fits under the server's file-size limit.
+        if video.size <= size_limit:
             try:
                 file = await video.to_file()
-            except (discord.HTTPException, discord.NotFound) as exc:
+                await target.send(content=header, file=file)
+                return True
+            except discord.HTTPException as exc:
+                log.warning("Re-upload of %s failed (%s); falling back to link.", video.filename, exc)
+            except discord.NotFound as exc:
                 log.warning("Could not fetch attachment %s: %s", video.filename, exc)
-                continue
-            content = f"📣 **{caption}**" if caption else None
-            await target.send(content=content, file=file)
+                return False
 
+        # Fallback: share the original CDN link so the video still gets out.
+        link_body = f"{header}\n{video.url}" if header else video.url
         try:
-            await message.add_reaction("✅")
-        except discord.HTTPException:
-            pass
+            await target.send(link_body)
+            return True
+        except discord.HTTPException as exc:
+            log.warning("Link fallback for %s failed: %s", video.filename, exc)
+            return False
 
 
 def _is_video(attachment: discord.Attachment) -> bool:

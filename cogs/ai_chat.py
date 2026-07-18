@@ -71,12 +71,15 @@ class AIChat(commands.Cog):
         messages.append({"role": "user", "content": _clean(message, self.bot.user)})
         return messages
 
-    # ── /model commands ──────────────────────────────────────
+    # ── /model commands (admins only) ────────────────────────
     model_group = app_commands.Group(
-        name="model", description="View or change the AI model Octo uses."
+        name="model",
+        description="View or change the AI model Octo uses.",
+        default_permissions=discord.Permissions(administrator=True),
     )
 
     @model_group.command(name="show", description="Show the current AI model.")
+    @app_commands.checks.has_permissions(administrator=True)
     async def model_show(self, interaction: discord.Interaction) -> None:
         model = await self._current_model(interaction.guild_id or 0)
         allowed = "\n".join(f"• `{m}`" for m in config.OPENROUTER_ALLOWED_MODELS)
@@ -87,7 +90,7 @@ class AIChat(commands.Cog):
 
     @model_group.command(name="set", description="Switch the AI model (admins only).")
     @app_commands.describe(model="One of the whitelisted models.")
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(administrator=True)
     async def model_set(self, interaction: discord.Interaction, model: str) -> None:
         if model not in config.OPENROUTER_ALLOWED_MODELS:
             await interaction.response.send_message(

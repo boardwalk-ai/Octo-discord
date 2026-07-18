@@ -85,7 +85,9 @@ class Scheduler(commands.Cog):
 
     # ── /schedule commands ───────────────────────────────────
     schedule_group = app_commands.Group(
-        name="schedule", description="Manage scheduled messages."
+        name="schedule",
+        description="Manage scheduled messages.",
+        default_permissions=discord.Permissions(administrator=True),
     )
 
     @schedule_group.command(name="add", description="Schedule a text message and/or a saved card.")
@@ -99,7 +101,7 @@ class Scheduler(commands.Cog):
     @app_commands.choices(
         repeat=[app_commands.Choice(name=r, value=r) for r in _REPEATS]
     )
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(administrator=True)
     async def schedule_add(
         self,
         interaction: discord.Interaction,
@@ -169,6 +171,7 @@ class Scheduler(commands.Cog):
         ][:25]
 
     @schedule_group.command(name="list", description="List scheduled messages.")
+    @app_commands.checks.has_permissions(administrator=True)
     async def schedule_list(self, interaction: discord.Interaction) -> None:
         rows = await self.bot.db.list_schedules(interaction.guild_id or 0)
         if not rows:
@@ -194,7 +197,7 @@ class Scheduler(commands.Cog):
 
     @schedule_group.command(name="remove", description="Delete a scheduled message by id.")
     @app_commands.describe(schedule_id="The id shown in /schedule list")
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(administrator=True)
     async def schedule_remove(
         self, interaction: discord.Interaction, schedule_id: int
     ) -> None:

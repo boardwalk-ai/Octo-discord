@@ -329,7 +329,9 @@ class Cards(commands.Cog):
         self.bot = bot
 
     card_group = app_commands.Group(
-        name="card", description="Create, edit and post interactive cards."
+        name="card",
+        description="Create, edit and post interactive cards.",
+        default_permissions=discord.Permissions(administrator=True),
     )
 
     async def _publish(
@@ -359,7 +361,7 @@ class Cards(commands.Cog):
         name="A short id for the card, e.g. 'welcome' or 'launch'",
         image="Optional: upload an image from your device to use on the card",
     )
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(administrator=True)
     async def card_edit(
         self,
         interaction: discord.Interaction,
@@ -384,7 +386,7 @@ class Cards(commands.Cog):
     @app_commands.describe(
         name="The card id", channel="Where to post (leave empty to pick from a menu)"
     )
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(administrator=True)
     async def card_post(
         self,
         interaction: discord.Interaction,
@@ -428,6 +430,7 @@ class Cards(commands.Cog):
         return await self._name_autocomplete(interaction, current)
 
     @card_group.command(name="show", description="Preview a saved card (only you see it).")
+    @app_commands.checks.has_permissions(administrator=True)
     async def card_show(self, interaction: discord.Interaction, name: str) -> None:
         card = await self.bot.db.get_card(interaction.guild_id or 0, name)
         if not card:
@@ -443,6 +446,7 @@ class Cards(commands.Cog):
         return await self._name_autocomplete(interaction, current)
 
     @card_group.command(name="list", description="List all saved cards.")
+    @app_commands.checks.has_permissions(administrator=True)
     async def card_list(self, interaction: discord.Interaction) -> None:
         cards = await self.bot.db.list_cards(interaction.guild_id or 0)
         if not cards:
@@ -458,7 +462,7 @@ class Cards(commands.Cog):
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     @card_group.command(name="delete", description="Delete a saved card.")
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(administrator=True)
     async def card_delete(self, interaction: discord.Interaction, name: str) -> None:
         ok = await self.bot.db.delete_card(interaction.guild_id or 0, name)
         msg = f"🗑️ Deleted **{name}**." if ok else f"No card named **{name}**."

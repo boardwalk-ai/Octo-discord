@@ -37,6 +37,7 @@ class Octo(commands.Bot):
 
     async def setup_hook(self) -> None:
         await self.db.connect()
+        self.tree.on_error = self._on_app_command_error
 
         for cog in INITIAL_COGS:
             await self.load_extension(cog)
@@ -51,6 +52,24 @@ class Octo(commands.Bot):
         else:
             synced = await self.tree.sync()
             log.info("Synced %d global slash commands", len(synced))
+
+    async def _on_app_command_error(
+        self,
+        interaction: discord.Interaction,
+        error: discord.app_commands.AppCommandError,
+    ) -> None:
+        if isinstance(error, discord.app_commands.CheckFailure):
+            message = "⛔ These commands are for server admins only."
+        else:
+            log.exception("Slash command error: %s", error)
+            message = "Something went wrong running that command. Please try again."
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except discord.HTTPException:
+            pass
 
     async def on_ready(self) -> None:
         log.info("Logged in as %s (id=%s)", self.user, self.user.id if self.user else "?")
