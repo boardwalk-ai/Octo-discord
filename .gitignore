@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Secrets & local config
+.env
+
+# Database
+*.db
+*.db-journal
+*.sqlite3
+
+# Logs
+*.log
+
+# Generated artifacts
+*.bundle
+
+# OS
+.DS_Store
