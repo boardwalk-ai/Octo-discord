@@ -9,6 +9,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 import config
+from cogs.cards import render_card
 from db import ScheduledMessage
 
 log = logging.getLogger("octo.scheduler")
@@ -49,7 +50,7 @@ class Scheduler(commands.Cog):
         channel = self.bot.get_channel(sched.channel_id)
         if isinstance(channel, discord.abc.Messageable):
             try:
-                await channel.send(sched.content)
+                await self._send(channel, sched)
             except discord.HTTPException as exc:
                 log.warning("Failed to send schedule %d: %s", sched.id, exc)
         else:
@@ -66,15 +67,32 @@ class Scheduler(commands.Cog):
             next_run += delta
         await self.bot.db.update_next_run(sched.id, next_run.isoformat())
 
+    async def _send(self, channel: discord.abc.Messageable, sched: ScheduledMessage) -> None:
+        """Post a scheduled item: plain text, a saved card, or both."""
+        if sched.card_name:
+            card = await self.bot.db.get_card(sched.guild_id, sched.card_name)
+            if card is not None:
+                embed, view, files = render_card(card)
+                await channel.send(
+                    content=sched.content or None, embed=embed, view=view, files=files
+                )
+                return
+            log.warning(
+                "Schedule %d references missing card %r", sched.id, sched.card_name
+            )
+        if sched.content:
+            await channel.send(sched.content)
+
     # ── /schedule commands ───────────────────────────────────
     schedule_group = app_commands.Group(
         name="schedule", description="Manage scheduled messages."
     )
 
-    @schedule_group.command(name="add", description="Schedule a message.")
+    @schedule_group.command(name="add", description="Schedule a text message and/or a saved card.")
     @app_commands.describe(
         when="When to send: 'HH:MM' or 'YYYY-MM-DD HH:MM' (server timezone)",
-        message="The message to send",
+        message="Text to send (optional if you pick a card)",
+        card="A saved card to post (with its buttons/image)",
         repeat="How often to repeat",
         channel="Channel to post in (defaults to here)",
     )
@@ -86,10 +104,28 @@ class Scheduler(commands.Cog):
         self,
         interaction: discord.Interaction,
         when: str,
-        message: str,
+        message: str | None = None,
+        card: str | None = None,
         repeat: app_commands.Choice[str] | None = None,
         channel: discord.TextChannel | None = None,
     ) -> None:
+        message = (message or "").strip()
+        if not message and not card:
+            await interaction.response.send_message(
+                "Give me something to send: a `message`, a `card`, or both.",
+                ephemeral=True,
+            )
+            return
+
+        if card:
+            existing = await self.bot.db.get_card(interaction.guild_id or 0, card)
+            if existing is None:
+                await interaction.response.send_message(
+                    f"No card named **{card}**. Create it with `/card edit` first.",
+                    ephemeral=True,
+                )
+                return
+
         repeat_value = repeat.value if repeat else "once"
         target = channel or interaction.channel
         if not isinstance(target, discord.abc.Messageable):
@@ -111,13 +147,26 @@ class Scheduler(commands.Cog):
             repeat=repeat_value,
             next_run=parsed.astimezone(timezone.utc).isoformat(),
             created_by=interaction.user.id,
+            card_name=card,
         )
         local = parsed.astimezone(config.TIMEZONE)
+        what = f"card **{card}**" if card else "message"
+        if card and message:
+            what = f"card **{card}** + text"
         await interaction.response.send_message(
-            f"✅ Scheduled **#{sid}** — {repeat_value}, next at "
+            f"✅ Scheduled **#{sid}** ({what}) — {repeat_value}, next at "
             f"`{local:%Y-%m-%d %H:%M}` ({config.TIMEZONE_NAME}) in {target.mention}.",  # type: ignore[union-attr]
             ephemeral=True,
         )
+
+    @schedule_add.autocomplete("card")
+    async def _card_ac(self, interaction, current):  # noqa: ANN001
+        cards = await self.bot.db.list_cards(interaction.guild_id or 0)
+        return [
+            app_commands.Choice(name=c.name, value=c.name)
+            for c in cards
+            if current.lower() in c.name.lower()
+        ][:25]
 
     @schedule_group.command(name="list", description="List scheduled messages.")
     async def schedule_list(self, interaction: discord.Interaction) -> None:
@@ -130,7 +179,13 @@ class Scheduler(commands.Cog):
         for s in rows:
             local = datetime.fromisoformat(s.next_run).astimezone(config.TIMEZONE)
             status = "" if s.enabled else " *(done)*"
-            preview = s.content if len(s.content) <= 40 else s.content[:37] + "..."
+            if s.card_name:
+                preview = f"🃏 card **{s.card_name}**"
+                if s.content:
+                    text = s.content if len(s.content) <= 30 else s.content[:27] + "..."
+                    preview += f" + {text}"
+            else:
+                preview = s.content if len(s.content) <= 40 else s.content[:37] + "..."
             lines.append(
                 f"**#{s.id}** · {s.repeat} · `{local:%Y-%m-%d %H:%M}` · <#{s.channel_id}>"
                 f"{status}\n> {preview}"

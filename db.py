@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS scheduled_messages (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id    INTEGER NOT NULL,
     channel_id  INTEGER NOT NULL,
-    content     TEXT    NOT NULL,
+    content     TEXT    NOT NULL DEFAULT '',
+    card_name   TEXT,                       -- optional: post a saved card instead of/with text
     -- 'once' | 'hourly' | 'daily' | 'weekly'
     repeat      TEXT    NOT NULL DEFAULT 'once',
     next_run    TEXT    NOT NULL,          -- ISO 8601 UTC timestamp
@@ -66,6 +67,7 @@ class ScheduledMessage:
     next_run: str
     enabled: bool
     created_by: int
+    card_name: str | None = None
 
 
 class Database:
@@ -78,6 +80,18 @@ class Database:
         self._conn.row_factory = aiosqlite.Row
         await self._conn.executescript(_SCHEMA)
         await self._conn.commit()
+        await self._migrate()
+
+    async def _migrate(self) -> None:
+        """Apply lightweight, additive schema migrations to existing databases."""
+        await self._ensure_column("scheduled_messages", "card_name", "card_name TEXT")
+
+    async def _ensure_column(self, table: str, column: str, ddl: str) -> None:
+        async with self.conn.execute(f"PRAGMA table_info({table})") as cur:
+            existing = {row["name"] for row in await cur.fetchall()}
+        if column not in existing:
+            await self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+            await self.conn.commit()
 
     async def close(self) -> None:
         if self._conn is not None:
@@ -178,14 +192,15 @@ class Database:
         repeat: str,
         next_run: str,
         created_by: int,
+        card_name: str | None = None,
     ) -> int:
         cur = await self.conn.execute(
             """
             INSERT INTO scheduled_messages
-                (guild_id, channel_id, content, repeat, next_run, created_by)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (guild_id, channel_id, content, card_name, repeat, next_run, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (guild_id, channel_id, content, repeat, next_run, created_by),
+            (guild_id, channel_id, content, card_name, repeat, next_run, created_by),
         )
         await self.conn.commit()
         return cur.lastrowid or 0
@@ -244,6 +259,7 @@ def _row_to_card(row: aiosqlite.Row) -> Card:
 
 
 def _row_to_schedule(row: aiosqlite.Row) -> ScheduledMessage:
+    keys = row.keys()
     return ScheduledMessage(
         id=row["id"],
         guild_id=row["guild_id"],
@@ -253,4 +269,5 @@ def _row_to_schedule(row: aiosqlite.Row) -> ScheduledMessage:
         next_run=row["next_run"],
         enabled=bool(row["enabled"]),
         created_by=row["created_by"],
+        card_name=row["card_name"] if "card_name" in keys else None,
     )
