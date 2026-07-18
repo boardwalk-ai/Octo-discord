@@ -1,0 +1,71 @@
+name: Deploy Octo
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-octo
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to server over SSH
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          command_timeout: 15m
+          envs: DISCORD_TOKEN,GUILD_ID,OPENROUTER_API_KEY,OPENROUTER_MODEL,OPENROUTER_FALLBACK_MODEL,OPENROUTER_ALLOWED_MODELS,OCTO_SYSTEM_PROMPT,TIMEZONE
+          script: |
+            set -euo pipefail
+
+            APP_DIR=/opt/octo
+            REPO=https://github.com/boardwalk-ai/Octo-discord.git
+
+            echo "==> Ensuring prerequisites (git, python3, venv)"
+            export DEBIAN_FRONTEND=noninteractive
+            if ! command -v git >/dev/null || ! command -v python3 >/dev/null; then
+              apt-get update -y
+            fi
+            command -v git >/dev/null     || apt-get install -y git
+            command -v python3 >/dev/null || apt-get install -y python3
+            dpkg -s python3-venv >/dev/null 2>&1 || apt-get install -y python3-venv
+
+            echo "==> Fetching latest code into $APP_DIR"
+            if [ ! -d "$APP_DIR/.git" ]; then
+              git clone "$REPO" "$APP_DIR"
+            fi
+            cd "$APP_DIR"
+            git fetch --all --prune
+            git reset --hard origin/main
+
+            echo "==> Writing .env from repository secrets"
+            cat > "$APP_DIR/.env" <<EOF
+            DISCORD_TOKEN=${DISCORD_TOKEN}
+            GUILD_ID=${GUILD_ID}
+            OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+            OPENROUTER_MODEL=${OPENROUTER_MODEL:-deepseek/deepseek-chat}
+            OPENROUTER_FALLBACK_MODEL=${OPENROUTER_FALLBACK_MODEL:-openai/gpt-4o-mini}
+            OPENROUTER_ALLOWED_MODELS=${OPENROUTER_ALLOWED_MODELS:-deepseek/deepseek-chat,google/gemini-2.0-flash-001,openai/gpt-4o-mini,anthropic/claude-sonnet-4}
+            OPENROUTER_APP_URL=https://octopilotai.com
+            OPENROUTER_APP_NAME=Octo
+            OCTO_SYSTEM_PROMPT=${OCTO_SYSTEM_PROMPT:-You are Octo, a friendly and concise Discord assistant. Keep replies short and helpful.}
+            AI_HISTORY_LIMIT=8
+            TIMEZONE=${TIMEZONE:-Asia/Yangon}
+            DATABASE_PATH=octo.db
+            EOF
+            chmod 600 "$APP_DIR/.env"
+
+            echo "==> Installing venv, deps and systemd service"
+            bash deploy/setup.sh
+
+            echo "==> Restarting service"
+            systemctl restart octo
+            sleep 3
+            systemctl --no-pager --full status octo || true
