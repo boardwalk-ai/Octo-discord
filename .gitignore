@@ -13,6 +13,9 @@ env/
 *.db-journal
 *.sqlite3
 
+# Uploaded card images (stored on the server at runtime)
+card_images/
+
 # Logs
 *.log
 
