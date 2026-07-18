@@ -43,12 +43,20 @@ class Octo(commands.Bot):
             await self.load_extension(cog)
             log.info("Loaded cog: %s", cog)
 
-        # Sync slash commands to the single guild for instant availability.
-        if config.GUILD_ID:
-            guild = discord.Object(id=config.GUILD_ID)
-            self.tree.copy_global_to(guild=guild)
-            synced = await self.tree.sync(guild=guild)
-            log.info("Synced %d slash commands to guild %s", len(synced), config.GUILD_ID)
+        # Sync slash commands to each configured guild for instant availability.
+        if config.GUILD_IDS:
+            for guild_id in config.GUILD_IDS:
+                guild = discord.Object(id=guild_id)
+                self.tree.copy_global_to(guild=guild)
+                try:
+                    synced = await self.tree.sync(guild=guild)
+                    log.info("Synced %d slash commands to guild %s", len(synced), guild_id)
+                except discord.HTTPException as exc:
+                    log.warning(
+                        "Could not sync to guild %s (is Octo a member of it?): %s",
+                        guild_id,
+                        exc,
+                    )
         else:
             synced = await self.tree.sync()
             log.info("Synced %d global slash commands", len(synced))

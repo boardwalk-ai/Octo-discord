@@ -20,7 +20,10 @@ def _split(name: str) -> list[str]:
 
 # ── Discord ──────────────────────────────────────────────────
 DISCORD_TOKEN = _get("DISCORD_TOKEN")
-GUILD_ID = int(_get("GUILD_ID") or 0) or None
+# GUILD_ID may hold one or several comma-separated guild IDs. Slash commands
+# are synced to each of them for instant availability.
+GUILD_IDS = [int(x) for x in _split("GUILD_ID") if x.isdigit()]
+GUILD_ID = GUILD_IDS[0] if GUILD_IDS else None  # backward-compat: first guild
 
 # ── OpenRouter ───────────────────────────────────────────────
 OPENROUTER_API_KEY = _get("OPENROUTER_API_KEY")
